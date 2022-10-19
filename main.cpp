@@ -1409,5 +1409,6 @@ int main() {
     Parser::work();
     SyntaxTree::work();
     ErrorHandler::output("error.txt");
+    
     return 0;
 }
