@@ -243,11 +243,17 @@ namespace SyntaxTree {
 //=======================================================================================================//
     
     map<string, string> funcType;
+    vector<pair<string, string>> labels;
     
     int tmpCnt = 0;
+    int labelCnt = 0;
     
     string getTmp() {
         return "tmp" + to_string(tmpCnt++);
+    }
+    
+    string getLabel() {
+        return "LABEL" + to_string(labelCnt++);
     }
     
     //TODO 数组
@@ -269,21 +275,21 @@ namespace SyntaxTree {
     //TODO 函数+数组
     string getUnaryExpIdent(int x) {
         vector<string> params;
-        Medium::addIR(IRType::SAVE);
         if (!edges[x].empty()) {
             int y = edges[x].front();
             for (auto to: edges[y]) {
                 params.emplace_back(getExp(to));
             }
-            for (const auto &tmp: params) {
-                Medium::addIR(IRType::PUSH, tmp);
-            }
+        }
+        Medium::addIR(IRType::SAVE);
+        for (const auto &tmp: params) {
+            Medium::addIR(IRType::PUSH, tmp);
         }
         Medium::addIR(IRType::CALL, idents[x]);
+        Medium::addIR(IRType::RESTORE);
         if (funcType[idents[x]] == "void") {
             return "";
         }
-        Medium::addIR(IRType::RESTORE);
         string res = getTmp();
         Medium::addIR(IRType::GETRET, res);
         return res;
@@ -303,7 +309,7 @@ namespace SyntaxTree {
             } else if (idents[y] == "-") {
                 Medium::addIR(IRType::SUB, tmp, "0", now);
             } else {
-                Medium::addIR(IRType::NOT, tmp, now);
+                Medium::addIR(IRType::EQ, tmp, now, "0");
             }
             return tmp;
         }
@@ -347,6 +353,76 @@ namespace SyntaxTree {
         return getAddExp(edges[x].front());
     }
     
+    pair<string, bool> getRelExp(int x) {
+        string now = getAddExp(edges[x].front());
+        bool isBool = false;
+        for (int i = 2; i < (int) edges[x].size(); i += 2) {
+            isBool = true;
+            string nxt = getAddExp(edges[x][i]);
+            string op = idents[edges[x][i - 1]];
+            string tmp = getTmp();
+            if (op == "<") {
+                Medium::addIR(IRType::LSS, tmp, now, nxt);
+            } else if (op == "<=") {
+                Medium::addIR(IRType::LEQ, tmp, now, nxt);
+            } else if (op == ">") {
+                Medium::addIR(IRType::LSS, tmp, nxt, now);
+            } else {
+                Medium::addIR(IRType::LEQ, tmp, nxt, now);
+            }
+            now = tmp;
+        }
+        return {now, isBool};
+    }
+    
+    string getEqExp(int x) {
+        auto t = getRelExp(edges[x].front());
+        string now = t.first;
+        if (!t.second && (int) edges[x].size() == 1) {
+            string tmp = getTmp();
+            Medium::addIR(IRType::NEQ, tmp, now, "0");
+            return tmp;
+        }
+        for (int i = 2; i < (int) edges[x].size(); i += 2) {
+            string nxt = getRelExp(edges[x][i]).first;
+            string op = idents[edges[x][i - 1]];
+            string tmp = getTmp();
+            if (op == "==") {
+                Medium::addIR(IRType::EQ, tmp, now, nxt);
+            } else {
+                Medium::addIR(IRType::NEQ, tmp, now, nxt);
+            }
+            now = tmp;
+        }
+        return now;
+    }
+    
+    string getLAndExp(int x) {
+        string now = getEqExp(edges[x].front());
+        for (int i = 2; i < (int) edges[x].size(); i += 2) {
+            string nxt = getEqExp(edges[x][i]);
+            string tmp = getTmp();
+            Medium::addIR(IRType::AND, tmp, now, nxt);
+            now = tmp;
+        }
+        return now;
+    }
+    
+    string getLOrExp(int x) {
+        string now = getLAndExp(edges[x].front());
+        for (int i = 2; i < (int) edges[x].size(); i += 2) {
+            string nxt = getLAndExp(edges[x][i]);
+            string tmp = getTmp();
+            Medium::addIR(IRType::OR, tmp, now, nxt);
+            now = tmp;
+        }
+        return now;
+    }
+    
+    string getCond(int x) {
+        return getLOrExp(edges[x].front());
+    }
+    
     void getParams(int x) {
         //TODO 函数参数
         for (auto y: edges[x]) {
@@ -355,10 +431,6 @@ namespace SyntaxTree {
         Medium::paramCnt[idents[fa[x]]] = (int) edges[x].size();
     }
 
-
-//        Cond, IfStmt, WhileStmt, BreakStmt, ContinueStmt,
-//        MulExp, AddExp, RelExp, EqExp, LAndExp,
-//        LOrExp, ConstExp,
     void codeGen(int x) {
         if (types[x] == SyntaxType::ConstDef || types[x] == SyntaxType::VarDef) {
             //TODO 数组
@@ -415,6 +487,36 @@ namespace SyntaxTree {
             }
         } else if (types[x] == SyntaxType::Exp) {
             getExp(x);
+        } else if (types[x] == SyntaxType::IfStmt) {
+            string now = getCond(edges[x].front());
+            string label = getLabel();
+            
+            Medium::addIR(IRType::BEQ, label, now, "0");
+            codeGen(edges[x][1]);
+            if ((int) edges[x].size() == 2) {
+                Medium::addIR(IRType::LABEL, label);
+            } else {
+                string endLabel = getLabel();
+                Medium::addIR(IRType::JUMP, endLabel);
+                Medium::addIR(IRType::LABEL, label);
+                codeGen(edges[x][2]);
+                Medium::addIR(IRType::LABEL, endLabel);
+            }
+        } else if (types[x] == SyntaxType::WhileStmt) {
+            string startLabel = getLabel();
+            string endLabel = getLabel();
+            labels.emplace_back(startLabel, endLabel);
+            Medium::addIR(IRType::LABEL, startLabel);
+            string now = getCond(edges[x].front());
+            Medium::addIR(IRType::BEQ, endLabel, now, "0");
+            codeGen(edges[x][1]);
+            Medium::addIR(IRType::JUMP, startLabel);
+            Medium::addIR(IRType::LABEL, endLabel);
+            labels.pop_back();
+        } else if (types[x] == SyntaxType::ContinueStmt) {
+            Medium::addIR(IRType::JUMP, labels.back().first);
+        } else if (types[x] == SyntaxType::BreakStmt) {
+            Medium::addIR(IRType::JUMP, labels.back().second);
         } else {
             for (auto to: edges[x]) {
                 codeGen(to);

@@ -77,21 +77,19 @@ namespace Medium {
     void store(const string &reg, const string &s, int offset) {
         codeOutput << "sw " << reg << "," << offset << "(" << s << ")" << endl;
     }
-
-//    EQ, NEQ, LSS, LEQ, GRE, GEQ,
-//    AND, OR, NOT,
-//    JUMP, BEQ,
+    
+    void calc(const IR &ir, const string& op) {
+        load("$t0", ir.num1);
+        load("$t1", ir.num2);
+        codeOutput << op << " $t2,$t0,$t1" << endl;
+        store("$t2", ir.res);
+    }
+    
     void translate(const IR &ir) {
         if (ir.type == IRType::ADD) {
-            load("$t0", ir.num1);
-            load("$t1", ir.num2);
-            codeOutput << "add $t2,$t0,$t1" << endl;
-            store("$t2", ir.res);
+            calc(ir, "addu");
         } else if (ir.type == IRType::SUB) {
-            load("$t0", ir.num1);
-            load("$t1", ir.num2);
-            codeOutput << "sub $t2,$t0,$t1" << endl;
-            store("$t2", ir.res);
+            calc(ir, "subu");
         } else if (ir.type == IRType::MUL) {
             load("$t0", ir.num1);
             load("$t1", ir.num2);
@@ -151,6 +149,30 @@ namespace Medium {
             rec--;
             load("$t0", "$sp", 4 * rec);
             store("$t0", ir.res);
+        } else if (ir.type == IRType::EQ) {
+            calc(ir, "seq");
+        } else if (ir.type == IRType::NEQ) {
+            calc(ir, "sne");
+        } else if (ir.type == IRType::LSS) {
+            calc(ir, "slt");
+        } else if (ir.type == IRType::LEQ) {
+            calc(ir, "sle");
+        } else if (ir.type == IRType::AND) {
+            calc(ir, "and");
+        } else if (ir.type == IRType::OR) {
+            calc(ir, "or");
+        } else if (ir.type == IRType::JUMP) {
+            codeOutput << "j " << ir.res << endl;
+        } else if (ir.type == IRType::LABEL) {
+            codeOutput << ir.res << ":" << endl;
+        } else if (ir.type == IRType::BEQ) {
+            load("$t0", ir.num1);
+            load("$t1", ir.num2);
+            codeOutput << "beq $t0,$t1," << ir.res << endl;
+        } else if (ir.type == IRType::BNE) {
+            load("$t0", ir.num1);
+            load("$t1", ir.num2);
+            codeOutput << "bne $t0,$t1," << ir.res << endl;
         }
     }
     
@@ -180,7 +202,6 @@ namespace Medium {
             getSpMem(IRs[i].res);
             translate(IRs[i]);
         }
-        
         
         codeOutput << "end:" << endl;
         codeOutput.close();
