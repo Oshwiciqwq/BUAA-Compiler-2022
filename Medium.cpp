@@ -36,7 +36,7 @@ namespace Medium {
     map<string, pair<string, int>> mem;
     int gpOff = 0, spOff = 0, rec = 0;
     
-    void getGpMem(const string &var, int offset) {
+    void getGpMem(const string &var) {
         if (var.substr(0, 3) != "var" && var.substr(0, 3) != "tmp") {
             return;
         }
@@ -44,22 +44,48 @@ namespace Medium {
             return;
         }
         mem[var] = {"$gp", gpOff};
-        gpOff += offset;
+        gpOff += 4;
     }
     
-    void getSpMem(const string &var, int offset) {
+    void getGpMemArr(const string &var, int offset) {
         if (var.substr(0, 3) != "var" && var.substr(0, 3) != "tmp") {
             return;
         }
         if (mem.find(var) != mem.end()) {
             return;
         }
-        spOff += offset;
+        getGpMem(var);
+        codeOutput << "addu $t0,$gp," << gpOff << endl;
+        store("$t0", var);
+        gpOff += offset;
+    }
+    
+    void getSpMem(const string &var) {
+        if (var.substr(0, 3) != "var" && var.substr(0, 3) != "tmp") {
+            return;
+        }
+        if (mem.find(var) != mem.end()) {
+            return;
+        }
+        spOff -= 4;
         mem[var] = {"$sp", spOff};
     }
     
+    void getSpMemArr(const string &var, int offset) {
+        if (var.substr(0, 3) != "var" && var.substr(0, 3) != "tmp") {
+            return;
+        }
+        if (mem.find(var) != mem.end()) {
+            return;
+        }
+        getSpMem(var);
+        spOff -= offset;
+        codeOutput << "addu $t0,$sp," << spOff << endl;
+        store("$t0", var);
+    }
+    
     void load(const string &reg, string s) {
-        if (isdigit(s[0])) {
+        if (SyntaxTree::isNumber(s)) {
             codeOutput << "li " << reg << "," << s << endl;
         } else {
             codeOutput << "lw " << reg << "," << mem[s].second << "(" << mem[s].first << ")" << endl;
@@ -78,19 +104,34 @@ namespace Medium {
         codeOutput << "sw " << reg << "," << offset << "(" << s << ")" << endl;
     }
     
-    void calc(const IR &ir, const string& op) {
+    void calc(const IR &ir, const string &op) {
         load("$t0", ir.num1);
         load("$t1", ir.num2);
         codeOutput << op << " $t2,$t0,$t1" << endl;
         store("$t2", ir.res);
     }
     
+    string getIndex(const string &arr, const string &index) {
+        load("$t0", arr);
+        load("$t1", index);
+        codeOutput << "sll $t1,$t1,2" << endl;
+        codeOutput << "addu $t0,$t0,$t1" << endl;
+        return "$t0";
+    }
+    
     void translate(const IR &ir) {
-        if (ir.type == IRType::ADD) {
+        if (ir.type == IRType::ARR_SAVE) {
+            load("$t2", ir.res);
+            store("$t2", getIndex(ir.num1, ir.num2), 0);
+        } else if (ir.type == IRType::ARR_LOAD) {
+            load("$t2", getIndex(ir.num1, ir.num2), 0);
+            store("$t2", ir.res);
+        } else if (ir.type == IRType::ADD) {
             calc(ir, "addu");
         } else if (ir.type == IRType::SUB) {
             calc(ir, "subu");
         } else if (ir.type == IRType::MUL) {
+            //TODO 移位优化
             load("$t0", ir.num1);
             load("$t1", ir.num2);
             codeOutput << "mult $t0,$t1" << endl;
@@ -189,7 +230,11 @@ namespace Medium {
             if (IRs[i].type == IRType::FUNC) {
                 break;
             }
-            getGpMem(IRs[i].res);
+            if (IRs[i].type == IRType::ARR) {
+                getGpMemArr(IRs[i].res, stoi(IRs[i].num1));
+            } else {
+                getGpMem(IRs[i].res);
+            }
             translate(IRs[i]);
         }
         codeOutput << "jal main" << endl;
@@ -199,7 +244,11 @@ namespace Medium {
             if (IRs[i].type == IRType::FUNC) {
                 spOff = 0;
             }
-            getSpMem(IRs[i].res);
+            if (IRs[i].type == IRType::ARR) {
+                getSpMemArr(IRs[i].res, stoi(IRs[i].num1));
+            } else {
+                getSpMem(IRs[i].res);
+            }
             translate(IRs[i]);
         }
         

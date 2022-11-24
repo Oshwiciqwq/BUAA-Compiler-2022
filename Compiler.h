@@ -262,7 +262,13 @@ namespace SyntaxTree {
     
     string getTmp();
     
+    string getLabel();
+    
+    bool isNumber(string s);
+    
     string getLVal(int x);
+    
+    void saveLVal(int x, const string &val);
     
     string getPrimaryExp(int x);
     
@@ -288,6 +294,8 @@ namespace SyntaxTree {
     
     void getParams(int x);
     
+    void getInitVals(int x);
+    
     void codeGen(int x);
     
     void work();
@@ -311,7 +319,7 @@ namespace ErrorHandler {
 
 
 enum class IRType {
-    VAR,
+    VAR, ARR, ARR_LOAD, ARR_SAVE,
     ADD, SUB, MUL, DIV, MOD,
     EQ, NEQ, LSS, LEQ,
     AND, OR,
@@ -323,7 +331,7 @@ enum class IRType {
 };
 
 const string IRTypeToString[] = {
-        "VAR",
+        "VAR", "ARR", "ARR_LOAD", "ARR_SAVE",
         "ADD", "SUB", "MUL", "DIV", "MOD",
         "EQ", "NEQ", "LSS", "LEQ",
         "AND", "OR",
@@ -348,9 +356,13 @@ namespace Medium {
     
     extern map<string, int> paramCnt;
     
-    void getGpMem(const string &var, int offset = 4);
+    void getGpMem(const string &var);
     
-    void getSpMem(const string &var, int offset = -4);
+    void getGpMemArr(const string &var, int offset);
+    
+    void getSpMem(const string &var);
+    
+    void getSpMemArr(const string &var, int offset);
     
     void load(const string &reg, string s);
     
@@ -360,7 +372,9 @@ namespace Medium {
     
     void store(const string &reg, const string &s, int offset);
     
-    void calc(const IR &ir, const string& op);
+    void calc(const IR &ir, const string &op);
+    
+    string getIndex(const string &arr, const string &index);
     
     void translate(const IR &ir);
     

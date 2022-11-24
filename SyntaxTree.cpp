@@ -244,6 +244,9 @@ namespace SyntaxTree {
     
     map<string, string> funcType;
     vector<pair<string, string>> labels;
+    map<string, vector<int>> arrayDim;
+    map<string, vector<int>> constVal;
+    vector<string> initVals;
     
     int tmpCnt = 0;
     int labelCnt = 0;
@@ -256,9 +259,78 @@ namespace SyntaxTree {
         return "LABEL" + to_string(labelCnt++);
     }
     
-    //TODO 数组
+    bool isNumber(string s) {
+        return !isalpha(s[0]);
+    }
+    
     string getLVal(int x) {
-        return idents[x];
+        if (edges[x].empty()) {
+            if (constVal.find(idents[x]) != constVal.end()) {
+                return to_string(constVal[idents[x]].front());
+            }
+            return idents[x];
+        }
+        vector<string> exps;
+        bool allNumber = true;
+        for (auto to: edges[x]) {
+            exps.emplace_back(getExp(to));
+            allNumber &= isNumber(exps.back());
+        }
+        vector<int> &dim = arrayDim[idents[x]];
+        if (exps.size() < dim.size()) {
+            if ((int) exps.size() == 0) {
+                return idents[x];
+            } else {
+                string tmp = getTmp();
+                Medium::addIR(IRType::MUL, tmp, exps.front(), to_string(dim.back() * 4));
+                string tmp1 = getTmp();
+                Medium::addIR(IRType::ADD, tmp1, idents[x], tmp);
+                return tmp1;
+            }
+        }
+        if (constVal.find(idents[x]) != constVal.end() && allNumber) {
+            vector<int> &arr = constVal[idents[x]];
+            int index = 0;
+            if ((int) exps.size() == 2) {
+                index += stoi(exps.front()) * dim.back();
+            }
+            if ((int) exps.size() >= 1) {
+                index += stoi(exps.back());
+            }
+            return to_string(arr[index]);
+        }
+        string tmp = getTmp();
+        string index = getTmp();
+        if ((int) exps.size() == 2) {
+            Medium::addIR(IRType::MUL, index, exps.front(), to_string(dim.back()));
+            Medium::addIR(IRType::ADD, index, index, exps.back());
+        }
+        if ((int) exps.size() == 1) {
+            Medium::addIR(IRType::ADD, index, exps.back(), "0");
+        }
+        Medium::addIR(IRType::ARR_LOAD, tmp, idents[x], index);
+        return tmp;
+    }
+    
+    void saveLVal(int x, const string &val) {
+        if (edges[x].empty()) {
+            Medium::addIR(IRType::ADD, idents[x], val, "0");
+            return;
+        }
+        vector<string> exps;
+        for (auto to: edges[x]) {
+            exps.emplace_back(getExp(to));
+        }
+        vector<int> &dim = arrayDim[idents[x]];
+        string index = getTmp();
+        if ((int) exps.size() == 2) {
+            Medium::addIR(IRType::MUL, index, exps.front(), to_string(dim.back()));
+            Medium::addIR(IRType::ADD, index, index, exps.back());
+        }
+        if ((int) exps.size() == 1) {
+            Medium::addIR(IRType::ADD, index, exps.back(), "0");
+        }
+        Medium::addIR(IRType::ARR_SAVE, val, idents[x], index);
     }
     
     string getPrimaryExp(int x) {
@@ -272,7 +344,6 @@ namespace SyntaxTree {
         }
     }
     
-    //TODO 函数+数组
     string getUnaryExpIdent(int x) {
         vector<string> params;
         if (!edges[x].empty()) {
@@ -303,6 +374,17 @@ namespace SyntaxTree {
             return getUnaryExpIdent(y);
         } else {
             string now = getUnaryExp(edges[x][1]);
+            if (isNumber(now)) {
+                int num = stoi(now);
+                if (idents[y] == "+") {
+                    num = +num;
+                } else if (idents[y] == "-") {
+                    num = -num;
+                } else {
+                    num = !num;
+                }
+                return to_string(num);
+            }
             string tmp = getTmp();
             if (idents[y] == "+") {
                 Medium::addIR(IRType::ADD, tmp, "0", now);
@@ -317,34 +399,56 @@ namespace SyntaxTree {
     
     string getMulExp(int x) {
         string now = getUnaryExp(edges[x].front());
+        bool allNumber = isNumber(now);
         for (int i = 2; i < (int) edges[x].size(); i += 2) {
             string nxt = getUnaryExp(edges[x][i]);
             string op = idents[edges[x][i - 1]];
-            string tmp = getTmp();
-            if (op == "*") {
-                Medium::addIR(IRType::MUL, tmp, now, nxt);
-            } else if (op == "/") {
-                Medium::addIR(IRType::DIV, tmp, now, nxt);
-            } else if (op == "%") {
-                Medium::addIR(IRType::MOD, tmp, now, nxt);
+            allNumber &= isNumber(nxt);
+            if (allNumber) {
+                if (op == "*") {
+                    now = to_string(stoi(now) * stoi(nxt));
+                } else if (op == "/") {
+                    now = to_string(stoi(now) / stoi(nxt));
+                } else if (op == "%") {
+                    now = to_string(stoi(now) % stoi(nxt));
+                }
+            } else {
+                string tmp = getTmp();
+                if (op == "*") {
+                    Medium::addIR(IRType::MUL, tmp, now, nxt);
+                } else if (op == "/") {
+                    Medium::addIR(IRType::DIV, tmp, now, nxt);
+                } else if (op == "%") {
+                    Medium::addIR(IRType::MOD, tmp, now, nxt);
+                }
+                now = tmp;
             }
-            now = tmp;
         }
         return now;
     }
     
     string getAddExp(int x) {
         string now = getMulExp(edges[x].front());
+        bool allNumber = isNumber(now);
         for (int i = 2; i < (int) edges[x].size(); i += 2) {
             string nxt = getMulExp(edges[x][i]);
             string op = idents[edges[x][i - 1]];
-            string tmp = getTmp();
-            if (op == "+") {
-                Medium::addIR(IRType::ADD, tmp, now, nxt);
-            } else if (op == "-") {
-                Medium::addIR(IRType::SUB, tmp, now, nxt);
+            allNumber &= isNumber(nxt);
+            if (allNumber) {
+                if (op == "+") {
+                    now = to_string(stoi(now) + stoi(nxt));
+                } else if (op == "-") {
+                    now = to_string(stoi(now) - stoi(nxt));
+                }
+            } else {
+                string tmp = getTmp();
+                if (op == "+") {
+                    Medium::addIR(IRType::ADD, tmp, now, nxt);
+                } else if (op == "-") {
+                    Medium::addIR(IRType::SUB, tmp, now, nxt);
+                }
+                now = tmp;
             }
-            now = tmp;
         }
         return now;
     }
@@ -424,22 +528,75 @@ namespace SyntaxTree {
     }
     
     void getParams(int x) {
-        //TODO 函数参数
         for (auto y: edges[x]) {
             Medium::addIR(IRType::PARAM, idents[y]);
+            if (!edges[y].empty()) {
+                arrayDim.insert({idents[y], vector<int>(0)});
+                for (auto z: edges[y]) {
+                    if (z == -1) {
+                        arrayDim[idents[y]].emplace_back(z);
+                    } else {
+                        arrayDim[idents[y]].emplace_back(stoi(getExp(z)));
+                    }
+                }
+            }
         }
         Medium::paramCnt[idents[fa[x]]] = (int) edges[x].size();
     }
-
+    
+    void getInitVals(int x) {
+        for (auto y: edges[x]) {
+            if (types[y] == SyntaxType::ConstExp || types[y] == SyntaxType::Exp) {
+                initVals.emplace_back(getExp(y));
+            } else {
+                getInitVals(y);
+            }
+        }
+    }
+    
     void codeGen(int x) {
         if (types[x] == SyntaxType::ConstDef || types[x] == SyntaxType::VarDef) {
-            //TODO 数组
-            Medium::addIR(IRType::VAR, idents[x]);
-            if (!edges[x].empty() &&
-                (types[edges[x].back()] == SyntaxType::InitVal || types[edges[x].back()] == SyntaxType::ConstInitVal)) {
-                int a1 = edges[x].back();   //InitVal
-                int a2 = edges[a1].front(); //Exp
-                Medium::addIR(IRType::ADD, idents[x], getExp(a2), "0");
+            if (!edges[x].empty() && types[edges[x].front()] == SyntaxType::ConstExp) {
+                int size = 1;
+                arrayDim.insert({idents[x], vector<int>(0)});
+                for (auto y: edges[x]) {
+                    if (types[y] == SyntaxType::ConstExp) {
+                        int s = stoi(getExp(y));
+                        arrayDim[idents[x]].emplace_back(s);
+                        size *= s;
+                    }
+                }
+                Medium::addIR(IRType::ARR, idents[x], to_string(size * 4));
+                if (types[edges[x].back()] == SyntaxType::InitVal ||
+                    types[edges[x].back()] == SyntaxType::ConstInitVal) {
+                    int a1 = edges[x].back();   //InitVal
+                    initVals.clear();
+                    getInitVals(a1);
+                    for (int i = 0; i < (int) initVals.size(); i++) {
+                        Medium::addIR(IRType::ARR_SAVE, initVals[i], idents[x], to_string(i));
+                    }
+                    if (types[x] == SyntaxType::ConstDef) {
+                        vector<int> val = vector<int>(0);
+                        for (auto i: initVals) {
+                            val.emplace_back(stoi(i));
+                        }
+                        constVal[idents[x]] = val;
+                    }
+                    
+                }
+            } else {
+                Medium::addIR(IRType::VAR, idents[x], "4");
+                if (!edges[x].empty() &&
+                    (types[edges[x].back()] == SyntaxType::InitVal ||
+                     types[edges[x].back()] == SyntaxType::ConstInitVal)) {
+                    int a1 = edges[x].back();   //InitVal
+                    int a2 = edges[a1].front(); //Exp
+                    string initVal = getExp(a2);
+                    Medium::addIR(IRType::ADD, idents[x], initVal, "0");
+                    if (types[x] == SyntaxType::ConstDef) {
+                        constVal[idents[x]] = vector<int>{stoi(initVal)};
+                    }
+                }
             }
         } else if (types[x] == SyntaxType::FuncDef || types[x] == SyntaxType::MainFuncDef) {
             funcType[idents[x]] = idents[edges[x].front()];
@@ -452,9 +609,7 @@ namespace SyntaxTree {
                 Medium::addIR(IRType::RETURN);
             }
         } else if (types[x] == SyntaxType::AssignStmt) {
-            string now = getLVal(edges[x].front());
-            string nxt = getExp(edges[x].back());
-            Medium::addIR(IRType::ADD, now, nxt, "0");
+            saveLVal(edges[x].front(), getExp(edges[x].back()));
         } else if (types[x] == SyntaxType::ReturnStmt) {
             if (!edges[x].empty()) {
                 Medium::addIR(IRType::RETURN, getExp(edges[x].front()));
@@ -462,7 +617,9 @@ namespace SyntaxTree {
                 Medium::addIR(IRType::RETURN);
             }
         } else if (types[x] == SyntaxType::GetintStmt) {
-            Medium::addIR(IRType::GETINT, getLVal(edges[x].front()));
+            string tmp = getTmp();
+            Medium::addIR(IRType::GETINT, tmp);
+            saveLVal(edges[x].front(), tmp);
         } else if (types[x] == SyntaxType::PrintfStmt) {
             if ((int) idents[x].size() == 2) {
                 return;
