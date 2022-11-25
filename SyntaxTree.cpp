@@ -501,30 +501,31 @@ namespace SyntaxTree {
         return now;
     }
     
-    string getLAndExp(int x) {
-        string now = getEqExp(edges[x].front());
-        for (int i = 2; i < (int) edges[x].size(); i += 2) {
-            string nxt = getEqExp(edges[x][i]);
-            string tmp = getTmp();
-            Medium::addIR(IRType::AND, tmp, now, nxt);
-            now = tmp;
+    string getLAndExp(int x, const string &noLabel) {
+        string tmp = getTmp();
+        for (int i = 0; i < (int) edges[x].size(); i += 2) {
+            string now = getEqExp(edges[x][i]);
+            Medium::addIR(IRType::OR, tmp, now, "0");
+            Medium::addIR(IRType::BEQ, noLabel, tmp, "0");
         }
-        return now;
+        return tmp;
     }
     
-    string getLOrExp(int x) {
-        string now = getLAndExp(edges[x].front());
-        for (int i = 2; i < (int) edges[x].size(); i += 2) {
-            string nxt = getLAndExp(edges[x][i]);
-            string tmp = getTmp();
-            Medium::addIR(IRType::OR, tmp, now, nxt);
-            now = tmp;
+    string getLOrExp(int x, const string &yesLabel, const string &noLabel) {
+        string tmp = getTmp();
+        for (int i = 0; i < (int) edges[x].size(); i += 2) {
+            string label = getLabel();
+            string now = getLAndExp(edges[x][i], label);
+            Medium::addIR(IRType::LABEL, label);
+            Medium::addIR(IRType::OR, tmp, now, "0");
+            Medium::addIR(IRType::BNE, yesLabel, tmp, "0");
         }
-        return now;
+        Medium::addIR(IRType::JUMP, noLabel);
+        return tmp;
     }
     
-    string getCond(int x) {
-        return getLOrExp(edges[x].front());
+    string getCond(int x, const string &yesLabel, const string &noLabel) {
+        return getLOrExp(edges[x].front(), yesLabel, noLabel);
     }
     
     void getParams(int x) {
@@ -577,7 +578,7 @@ namespace SyntaxTree {
                     }
                     if (types[x] == SyntaxType::ConstDef) {
                         vector<int> val = vector<int>(0);
-                        for (auto i: initVals) {
+                        for (const auto &i: initVals) {
                             val.emplace_back(stoi(i));
                         }
                         constVal[idents[x]] = val;
@@ -645,30 +646,34 @@ namespace SyntaxTree {
         } else if (types[x] == SyntaxType::Exp) {
             getExp(x);
         } else if (types[x] == SyntaxType::IfStmt) {
-            string now = getCond(edges[x].front());
-            string label = getLabel();
+            string yesLabel = getLabel();
+            string noLabel = getLabel();
+            string now = getCond(edges[x].front(), yesLabel, noLabel);
             
-            Medium::addIR(IRType::BEQ, label, now, "0");
+            Medium::addIR(IRType::BEQ, noLabel, now, "0");
+            Medium::addIR(IRType::LABEL, yesLabel);
             codeGen(edges[x][1]);
             if ((int) edges[x].size() == 2) {
-                Medium::addIR(IRType::LABEL, label);
+                Medium::addIR(IRType::LABEL, noLabel);
             } else {
                 string endLabel = getLabel();
                 Medium::addIR(IRType::JUMP, endLabel);
-                Medium::addIR(IRType::LABEL, label);
+                Medium::addIR(IRType::LABEL, noLabel);
                 codeGen(edges[x][2]);
                 Medium::addIR(IRType::LABEL, endLabel);
             }
         } else if (types[x] == SyntaxType::WhileStmt) {
             string startLabel = getLabel();
-            string endLabel = getLabel();
-            labels.emplace_back(startLabel, endLabel);
+            string yesLabel = getLabel();
+            string noLabel = getLabel();
+            labels.emplace_back(startLabel, noLabel);
             Medium::addIR(IRType::LABEL, startLabel);
-            string now = getCond(edges[x].front());
-            Medium::addIR(IRType::BEQ, endLabel, now, "0");
+            string now = getCond(edges[x].front(), yesLabel, noLabel);
+            Medium::addIR(IRType::BEQ, noLabel, now, "0");
+            Medium::addIR(IRType::LABEL, yesLabel);
             codeGen(edges[x][1]);
             Medium::addIR(IRType::JUMP, startLabel);
-            Medium::addIR(IRType::LABEL, endLabel);
+            Medium::addIR(IRType::LABEL, noLabel);
             labels.pop_back();
         } else if (types[x] == SyntaxType::ContinueStmt) {
             Medium::addIR(IRType::JUMP, labels.back().first);
@@ -684,6 +689,8 @@ namespace SyntaxTree {
     void work() {
         fa.resize(total);
         dfs(0, -1);
-        codeGen(0);
+        if (!ErrorHandler::error()) {
+            codeGen(0);
+        }
     }
 }

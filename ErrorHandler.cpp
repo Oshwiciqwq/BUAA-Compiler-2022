@@ -7,6 +7,10 @@
 namespace ErrorHandler {
     map<int, ErrorType> errors;
     
+    bool error() {
+        return !errors.empty();
+    }
+    
     void addError(ErrorType type, int lineNumber) {
         if (errors.find(lineNumber) == errors.end()) {
             errors[lineNumber] = type;

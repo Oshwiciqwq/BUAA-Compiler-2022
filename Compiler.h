@@ -286,11 +286,11 @@ namespace SyntaxTree {
     
     string getEqExp(int x);
     
-    string getLAndExp(int x);
+    string getLAndExp(int x, const string &noLabel);
     
-    string getLOrExp(int x);
+    string getLOrExp(int x, const string &yesLabel, const string &noLabel);
     
-    string getCond(int x);
+    string getCond(int x, const string &yesLabel, const string &noLabel);
     
     void getParams(int x);
     
@@ -310,6 +310,8 @@ const string ErrorTypeToString[] = {
 };
 
 namespace ErrorHandler {
+    bool error();
+    
     void addError(ErrorType type, int lineNumber);
     
     bool checkFormatString(string s);
